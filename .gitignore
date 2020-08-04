@@ -1,0 +1,4 @@
+venv/
+redis-data/
+*.pyc
+.idea/
