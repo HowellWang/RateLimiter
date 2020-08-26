@@ -10,7 +10,7 @@ CALL_PER_DAY = 30
 app = Flask(__name__)
 
 
-def rate_limit(func):
+def rate_limit(func_name):
     route_score = 1
 
     r = redis.Redis(host='localhost', port=6379, db=0)
@@ -21,7 +21,6 @@ def rate_limit(func):
 
     epoch = int(time.time() * 1000)
     pipe = r.pipeline()
-    func_name = func.__name__
 
     pipe.zremrangebyscore('%s:%s:hourly' % (func_name, api), 0, epoch - 3600000)
     pipe.zadd('%s:%s:hourly' % (func_name, api), {'%d:%d' % (epoch, route_score): epoch})
@@ -50,7 +49,7 @@ def rate_limit(func):
 
 @app.route('/')
 def root():
-    resp = rate_limit(root)
+    resp = rate_limit(root.__name__)
 
     if resp.status_code == 429:
         return resp
