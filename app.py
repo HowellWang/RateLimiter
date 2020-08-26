@@ -1,6 +1,8 @@
-from flask import Flask, request, Response
-import redis
+import json
 import time
+
+import redis
+from flask import Flask, request, Response
 
 CALL_PER_HOUR = 10
 CALL_PER_DAY = 30
@@ -8,13 +10,7 @@ CALL_PER_DAY = 30
 app = Flask(__name__)
 
 
-@app.route('/')
-def root():
-    return Response('Ok')
-
-
-@app.route('/rate_limiting')
-def rate_limit():
+def rate_limit(func):
     route_score = 1
 
     r = redis.Redis(host='localhost', port=6379, db=0)
@@ -25,16 +21,17 @@ def rate_limit():
 
     epoch = int(time.time() * 1000)
     pipe = r.pipeline()
+    func_name = func.__name__
 
-    pipe.zremrangebyscore('%s:hourly' % api, 0, epoch - 3600000)
-    pipe.zadd('%s:hourly' % api, {'%d:%d' % (epoch, route_score): epoch})
-    pipe.zrange('%s:hourly' % api, 0, -1)
-    pipe.expire('%s:hourly' % api, 3600000)
+    pipe.zremrangebyscore('%s:%s:hourly' % (func_name, api), 0, epoch - 3600000)
+    pipe.zadd('%s:%s:hourly' % (func_name, api), {'%d:%d' % (epoch, route_score): epoch})
+    pipe.zrange('%s:%s:hourly' % (func_name, api), 0, -1)
+    pipe.expire('%s:%s:hourly' % (func_name, api), 3600000)
 
-    pipe.zremrangebyscore('%s:daily' % api, 0, epoch - 86400000)
-    pipe.zadd('%s:daily' % api, {'%d:%d' % (epoch, route_score): epoch})
-    pipe.zrange('%s:daily' % api, 0, -1)
-    pipe.expire('%s:daily' % api, 864000000)
+    pipe.zremrangebyscore('%s:%s:daily' % (func_name, api), 0, epoch - 86400000)
+    pipe.zadd('%s:%s:daily' % (func_name, api), {'%d:%d' % (epoch, route_score): epoch})
+    pipe.zrange('%s:%s:daily' % (func_name, api), 0, -1)
+    pipe.expire('%s:%s:daily' % (func_name, api), 864000000)
 
     res = pipe.execute()
 
@@ -48,6 +45,17 @@ def rate_limit():
 
     resp.headers['X-Rate-Limit-Hour-Remaining'] = CALL_PER_HOUR - hour_score
     resp.headers['X-Rate-Limit-Day-Remaining'] = CALL_PER_DAY - day_score
+    return resp
+
+
+@app.route('/')
+def root():
+    resp = rate_limit(root)
+
+    if resp.status_code == 429:
+        return resp
+
+    resp.set_data(json.dumps({'success': True}))
     return resp
 
 
